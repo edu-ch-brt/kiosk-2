@@ -15,7 +15,7 @@ cd /home/runner/work/kiosk-2/kiosk-2
 python -m pip install -r requirements.txt
 ```
 - **Validated:** Works in this environment; downloads large dependencies (torch ~900MB + CUDA wheels). Expect several minutes and high bandwidth.
-- **Note:** This installs GPU-enabled torch wheels. `config.json` already has `"bria": false`; you can also disable `"birefnet": false` if you need to avoid model downloads at runtime, but dependencies are still required by `requirements.txt`.
+- **Note:** This installs GPU-enabled torch wheels. `config.json` already has `"bria": false`; you can set `"birefnet": false` to avoid that model download at runtime, but dependencies are still required by `requirements.txt`.
 
 ### Run (GUI app)
 ```bash
@@ -41,7 +41,7 @@ python -m unittest discover
   - `requirements.txt` — Python dependencies.
   - `head_outline.png`, `head_outline_720x540.png` — overlay assets.
   - `shutter_sound.wav` — optional shutter sound.
-  - `readme.md` — usage instructions and troubleshooting.
+  - `README.md` — usage instructions and troubleshooting.
 - **Key runtime paths:**
   - Output photos saved to `id_photos/` (created at runtime).
   - Config is loaded from `config.json` in repo root; defaults are in `load_config()` inside `id_photo_booth.py`.
