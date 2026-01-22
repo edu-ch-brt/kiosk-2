@@ -344,13 +344,28 @@ class IDPhotoBooth:
         """Setup main UI elements: labels, canvas, status, and hidden loading frame."""
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
         tk.Label(self.main_frame, text=self.config["ui"]["title"], font=('Helvetica', 24, 'bold')).pack(pady=10)
         tk.Label(self.main_frame, text=self.config["ui"]["subtitle"], font=('Helvetica', 12)).pack(pady=5)
-        self.canvas = tk.Canvas(self.main_frame, width=self.config["display"]["width"], height=self.config["display"]["height"])
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        # Canvas container for centering
+        canvas_container = tk.Frame(self.main_frame)
+        canvas_container.pack(fill=tk.BOTH, expand=True)
+
+        # Canvas with fixed size to maintain aspect ratio
+        self.canvas = tk.Canvas(
+            canvas_container,
+            width=self.config["display"]["width"],
+            height=self.config["display"]["height"],
+            highlightthickness=0
+        )
+        self.canvas.pack(anchor=tk.CENTER, expand=True)
+
+        # Status label
         self.status_var = tk.StringVar(value="Initializing...")
         tk.Label(self.main_frame, textvariable=self.status_var, font=('Helvetica', 12)).pack(pady=10)
-        
+
         # Add hidden loading frame with progress bar
         self.loading_frame = tk.Frame(self.main_frame)
         self.progress_bar = ttk.Progressbar(self.loading_frame, mode='indeterminate', length=300)
