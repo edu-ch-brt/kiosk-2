@@ -10,8 +10,35 @@ import threading
 import io
 import re
 import json
+import logging
 from pathlib import Path
 import time
+from typing import Dict, Any, Optional, Tuple
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('id_photo_booth.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Constants
+ASPECT_RATIO = 3 / 4  # Portrait 3:4 aspect ratio
+VIDEO_UPDATE_INTERVAL_MS = 33  # ~30 FPS
+LOADING_CHECK_INTERVAL_MS = 100  # Check model loading progress
+FRAME_SLEEP_MS = 0.001  # Camera stream sleep interval
+PREVIEW_WINDOW_WIDTH = 400
+PREVIEW_WINDOW_HEIGHT = 600
+PREVIEW_IMAGE_WIDTH = 300
+PREVIEW_IMAGE_HEIGHT = 400
+HEAD_OUTLINE_FILE = "head_outline.png"
+SHUTTER_SOUND_FILE = "shutter_sound.wav"
+CONFIG_FILE = "config.json"
+LOG_FILE = "id_photo_booth.log"
 
 # Import rembg if available
 try:
@@ -35,14 +62,58 @@ try:
     BIREFNET_AVAILABLE = True
 except ImportError:
     BIREFNET_AVAILABLE = False
-    print("Warning: BiRefNet-Portrait not available. Only rembg will be used.")
-    print("Install with: pip install torch torchvision transformers")
+    logger.warning("BiRefNet-Portrait not available. Only rembg will be used.")
+    logger.info("Install with: pip install torch torchvision transformers")
 
 
-def load_config():
-    """Load config from json or defaults."""
-    config_path = Path(__file__).parent / "config.json"
-    defaults = {
+def validate_config(config: Dict[str, Any]) -> None:
+    """Validate config structure and values.
+
+    Args:
+        config: Configuration dictionary to validate
+
+    Raises:
+        ValueError: If configuration is invalid
+    """
+    required_sections = ["output", "display", "camera", "ui", "background_options", "birefnet"]
+    for section in required_sections:
+        if section not in config:
+            raise ValueError(f"Missing required config section: {section}")
+
+    # Validate output section
+    if config["output"]["width"] <= 0 or config["output"]["height"] <= 0:
+        raise ValueError("Output dimensions must be positive")
+    if not 1 <= config["output"]["jpeg_quality"] <= 100:
+        raise ValueError("JPEG quality must be between 1 and 100")
+
+    # Validate display section
+    if config["display"]["width"] <= 0 or config["display"]["height"] <= 0:
+        raise ValueError("Display dimensions must be positive")
+
+    # Validate camera section
+    if config["camera"]["device_index"] < 0:
+        raise ValueError("Camera device index cannot be negative")
+    if config["camera"]["width"] <= 0 or config["camera"]["height"] <= 0:
+        raise ValueError("Camera dimensions must be positive")
+    if config["camera"]["fps"] <= 0:
+        raise ValueError("Camera FPS must be positive")
+
+    # Validate BiRefNet section
+    if config["birefnet"]["processing_width"] <= 0 or config["birefnet"]["processing_height"] <= 0:
+        raise ValueError("BiRefNet processing dimensions must be positive")
+
+    logger.info("Config validation passed")
+
+
+def load_config() -> Dict[str, Any]:
+    """Load configuration from JSON file or return defaults.
+
+    Returns:
+        Dictionary containing application configuration with sections for
+        output, display, camera, UI, background options, and BiRefNet settings.
+    """
+    config_path = Path(__file__).parent / CONFIG_FILE
+    defaults: Dict[str, Any] = {
         "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
         "display": {"width": 540, "height": 720, "fullscreen": True},
         "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
@@ -53,34 +124,61 @@ def load_config():
     if config_path.exists():
         try:
             with open(config_path, 'r') as f:
-                return json.load(f)
+                config = json.load(f)
+                validate_config(config)
+                return config
+        except ValueError as e:
+            logger.error(f"Config validation failed: {e}. Using defaults.")
+            return defaults
         except Exception as e:
-            print(f"Warning: Invalid config.json: {e}. Using defaults.")
+            logger.warning(f"Invalid config.json: {e}. Using defaults.")
+            return defaults
+    logger.info("No config.json found, using defaults")
     return defaults
 
 class CameraStream:
-    """Threaded camera stream handler."""
-    def __init__(self, config):
-        self.camera = None
-        self.frame = None
-        self.running = False
-        self.lock = threading.Lock()
-        self.failed_frame_count = 0
-        self.config = config
+    """Threaded camera stream handler for continuous frame capture.
 
-    def start(self):
-        """Start camera and thread."""
-        self.camera = cv2.VideoCapture(self.config["camera"]["device_index"])
-        if not self.camera.isOpened():
+    This class manages camera access in a separate thread to prevent blocking
+    the main UI thread. It continuously reads frames from the camera and makes
+    them available through a thread-safe read() method.
+    """
+    def __init__(self, config: Dict[str, Any]) -> None:
+        """Initialize the camera stream.
+
+        Args:
+            config: Application configuration dictionary containing camera settings.
+        """
+        self.camera: Optional[cv2.VideoCapture] = None
+        self.frame: Optional[np.ndarray] = None
+        self.running: bool = False
+        self.lock: threading.Lock = threading.Lock()
+        self.failed_frame_count: int = 0
+        self.config: Dict[str, Any] = config
+
+    def start(self) -> bool:
+        """Start camera capture and background streaming thread.
+
+        Returns:
+            True if camera started successfully, False otherwise.
+        """
+        try:
+            self.camera = cv2.VideoCapture(self.config["camera"]["device_index"])
+            if not self.camera.isOpened():
+                logger.error(f"Failed to open camera at index {self.config['camera']['device_index']}")
+                return False
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.config["camera"]["width"])
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config["camera"]["height"])
+            self.camera.set(cv2.CAP_PROP_FPS, self.config["camera"]["fps"])
+            self.running = True
+            threading.Thread(target=self._stream, daemon=True).start()
+            logger.info(f"Camera started successfully at index {self.config['camera']['device_index']}")
+            return True
+        except Exception as e:
+            logger.error(f"Exception starting camera: {e}")
             return False
-        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.config["camera"]["width"])
-        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config["camera"]["height"])
-        self.camera.set(cv2.CAP_PROP_FPS, self.config["camera"]["fps"])
-        self.running = True
-        threading.Thread(target=self._stream, daemon=True).start()
-        return True
 
-    def _stream(self):
+    def _stream(self) -> None:
         """Read frames in background loop."""
         while self.running:
             ret, frame = self.camera.read()
@@ -90,47 +188,72 @@ class CameraStream:
                     self.failed_frame_count = 0
                 else:
                     self.failed_frame_count += 1
-            time.sleep(0.001)
+            time.sleep(FRAME_SLEEP_MS)
 
-    def read(self):
-        """Get latest frame thread-safely."""
+    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        """Get the latest camera frame in a thread-safe manner.
+
+        Returns:
+            Tuple of (success, frame) where success is True if a frame is available,
+            and frame is the numpy array containing the image data or None.
+        """
         with self.lock:
             return self.frame is not None, self.frame.copy() if self.frame is not None else None
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop stream and release camera resources."""
         self.running = False
         if self.camera:
-            self.camera.release()
+            try:
+                self.camera.release()
+                logger.info("Camera released successfully")
+            except Exception as e:
+                logger.error(f"Error releasing camera: {e}")
 
 class IDPhotoBooth:
-    """Main photo booth app class."""
-    def __init__(self):
-        self.config = load_config()
-        self.root = tk.Tk()
+    """Main photo booth application managing UI, camera, and background removal.
+
+    This class coordinates all aspects of the photo booth including camera
+    capture, UI display, background removal model loading, and photo saving.
+    """
+    def __init__(self) -> None:
+        """Initialize the photo booth application and set up all components."""
+        self.config: Dict[str, Any] = load_config()
+        self.root: tk.Tk = tk.Tk()
         self.root.title(self.config["ui"]["title"])
-        display_w, display_h = self.config["display"]["width"], self.config["display"]["height"]
+        display_w: int = self.config["display"]["width"]
+        display_h: int = self.config["display"]["height"]
         self.root.geometry(f"{display_w}x{display_h}")
         if self.config["display"]["fullscreen"]:
             self.root.attributes('-fullscreen', True)
-        self.camera_stream = CameraStream(self.config)
-        self.running = False
-        self.video_after_id = None
-        self.head_outline = self._load_head_outline(display_w, display_h)
-        self.shutter_sound = self._load_shutter_sound()
-        self.rembg_session = None
-        self.bria_session = None
-        self.birefnet_model = None
-        self.output_dir = Path(self.config["output"]["directory"])
+        self.camera_stream: CameraStream = CameraStream(self.config)
+        self.running: bool = False
+        self.video_after_id: Optional[str] = None
+        self.head_outline: Optional[Image.Image] = self._load_head_outline(display_w, display_h)
+        self.shutter_sound: Optional[Any] = self._load_shutter_sound()
+        self.rembg_session: Optional[Any] = None
+        self.bria_session: Optional[Any] = None
+        self.birefnet_model: Optional[Any] = None
+        self.output_dir: Path = Path(self.config["output"]["directory"])
         self.output_dir.mkdir(exist_ok=True)
         self._setup_ui()
         self.root.bind('<space>', lambda e: self.capture_photo())
         self.root.bind('<Escape>', lambda e: self.quit_app())
-        self.model_loading_thread = None  # Track loading thread
+        self.model_loading_thread: Optional[threading.Thread] = None  # Track loading thread
 
-    def _load_head_outline(self, w, h):
-        """Load outline image and convert white background to transparent alpha."""
-        path = Path(__file__).parent / "head_outline.png"
+    def _load_head_outline(self, w: int, h: int) -> Optional[Image.Image]:
+        """Load head outline guide image and prepare for overlay.
+
+        Converts white background to transparent and resizes to display dimensions.
+
+        Args:
+            w: Target width in pixels.
+            h: Target height in pixels.
+
+        Returns:
+            PIL Image with transparency or None if file not found.
+        """
+        path = Path(__file__).parent / HEAD_OUTLINE_FILE
         if path.exists():
             img = Image.open(path).convert('RGB')
             # Convert to grayscale, invert for alpha (black outline opaque, white transparent)
@@ -138,22 +261,22 @@ class IDPhotoBooth:
             alpha = Image.eval(gray, lambda x: 255 - x)
             img.putalpha(alpha)
             return img.resize((w, h), Image.LANCZOS)
-        print("Warning: head_outline.png not found.")
+        logger.warning("head_outline.png not found.")
         return None
 
-    def _load_shutter_sound(self):
+    def _load_shutter_sound(self) -> Optional[Any]:
         """Load optional shutter sound if pygame available."""
         if PYGAME_AVAILABLE:
             try:
                 pygame.mixer.init()
-                path = Path(__file__).parent / "shutter_sound.wav"
+                path = Path(__file__).parent / SHUTTER_SOUND_FILE
                 if path.exists():
                     return pygame.mixer.Sound(str(path))
             except Exception as e:
-                print(f"Warning: Sound load failed: {e}")
+                logger.warning(f"Sound load failed: {e}")
         return None
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         """Setup main UI elements: labels, canvas, status, and hidden loading frame."""
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
@@ -171,8 +294,14 @@ class IDPhotoBooth:
         tk.Label(self.loading_frame, text="Loading background tools...").pack()
         self.loading_frame.pack_forget()  # Hide initially
 
-    def start_camera(self):
-        """Start camera stream and begin video update loop."""
+    def start_camera(self) -> bool:
+        """Start camera stream and initialize video preview loop.
+
+        Also triggers asynchronous loading of background removal models.
+
+        Returns:
+            True if camera started successfully, False otherwise.
+        """
         if self.camera_stream.start():
             self.running = True
             self._update_video()
@@ -181,7 +310,7 @@ class IDPhotoBooth:
         self.status_var.set("Error: Camera not found")
         return False
 
-    def _load_models_async(self):
+    def _load_models_async(self) -> None:
         """Load enabled background removal models in a background thread."""
         # Show progress bar if any models to load
         if REMBG_AVAILABLE and (self.config["background_options"]["rembg"] or self.config["background_options"]["bria"]) or (BIREFNET_AVAILABLE and self.config["background_options"]["birefnet"]):
@@ -191,12 +320,31 @@ class IDPhotoBooth:
         
         def load():
             if REMBG_AVAILABLE and self.config["background_options"]["rembg"]:
-                self.rembg_session = new_session(model_name="u2net")
+                try:
+                    logger.info("Loading rembg u2net model...")
+                    self.rembg_session = new_session(model_name="u2net")
+                    logger.info("rembg u2net model loaded successfully")
+                except Exception as e:
+                    logger.error(f"Failed to load rembg u2net model: {e}")
+
             if REMBG_AVAILABLE and self.config["background_options"]["bria"]:
-                self.bria_session = new_session(model_name="bria-rmbg")
+                try:
+                    logger.info("Loading BRIA model...")
+                    self.bria_session = new_session(model_name="bria-rmbg")
+                    logger.info("BRIA model loaded successfully")
+                except Exception as e:
+                    logger.error(f"Failed to load BRIA model: {e}")
+
             if BIREFNET_AVAILABLE and self.config["background_options"]["birefnet"]:
-                self.birefnet_model = AutoModelForImageSegmentation.from_pretrained("ZhengPeng7/BiRefNet-portrait", trust_remote_code=True)
-                self.birefnet_model.eval()
+                try:
+                    logger.info("Loading BiRefNet-portrait model...")
+                    self.birefnet_model = AutoModelForImageSegmentation.from_pretrained(
+                        "ZhengPeng7/BiRefNet-portrait", trust_remote_code=True
+                    )
+                    self.birefnet_model.eval()
+                    logger.info("BiRefNet-portrait model loaded successfully")
+                except Exception as e:
+                    logger.error(f"Failed to load BiRefNet-portrait model: {e}")
         
         self.model_loading_thread = threading.Thread(target=load, daemon=True)
         self.model_loading_thread.start()
@@ -204,16 +352,16 @@ class IDPhotoBooth:
         # Check periodically if loading done
         self._check_loading_complete()
 
-    def _check_loading_complete(self):
+    def _check_loading_complete(self) -> None:
         """Check if model loading thread finished; hide bar and update status."""
         if self.model_loading_thread.is_alive():
-            self.root.after(100, self._check_loading_complete)
+            self.root.after(LOADING_CHECK_INTERVAL_MS, self._check_loading_complete)
         else:
             self.progress_bar.stop()
             self.loading_frame.pack_forget()
             self.status_var.set("Ready - Position yourself")
 
-    def _update_video(self):
+    def _update_video(self) -> None:
         """Update canvas with latest frame, cropped to 3:4 and overlaid with outline."""
         if not self.running:
             return
@@ -221,7 +369,7 @@ class IDPhotoBooth:
         if ret:
             # Crop frame to 3:4 aspect ratio by centering the shorter dimension
             h, w = frame.shape[:2]
-            target_ratio = 3/4
+            target_ratio = ASPECT_RATIO
             current_ratio = w / h
             if current_ratio > target_ratio:
                 crop_w = int(h * target_ratio)
@@ -239,10 +387,14 @@ class IDPhotoBooth:
                 img = Image.alpha_composite(img.convert('RGBA'), self.head_outline)
             self.photo = ImageTk.PhotoImage(img)
             self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
-        self.video_after_id = self.root.after(33, self._update_video)  # Target ~30 FPS
+        self.video_after_id = self.root.after(VIDEO_UPDATE_INTERVAL_MS, self._update_video)  # Target ~30 FPS
 
-    def capture_photo(self):
-        """Capture current frame on space key press, play sound if available."""
+    def capture_photo(self) -> None:
+        """Capture current camera frame and initiate processing.
+
+        Triggered by spacebar press. Plays shutter sound if available and
+        processes the captured frame in a background thread.
+        """
         if not self.running:
             return
         ret, frame = self.camera_stream.read()
@@ -254,11 +406,11 @@ class IDPhotoBooth:
         self.status_var.set("Processing...")
         threading.Thread(target=self._process_capture, args=(frame,), daemon=True).start()
 
-    def _process_capture(self, frame):
+    def _process_capture(self, frame: np.ndarray) -> None:
         """Process captured frame: crop/resize to output size, generate background removal versions."""
         # Crop to 3:4 and resize to final output dimensions
         h, w = frame.shape[:2]
-        target_ratio = 3/4
+        target_ratio = ASPECT_RATIO
         current_ratio = w / h
         if current_ratio > target_ratio:
             crop_w = int(h * target_ratio)
@@ -286,7 +438,7 @@ class IDPhotoBooth:
                 white_bg = Image.new('RGBA', result_img.size, (255, 255, 255, 255))
                 version_rembg = Image.alpha_composite(white_bg, result_img).convert('RGB')
             except Exception as e:
-                print(f"rembg failed: {e}")
+                logger.error(f"rembg failed: {e}")
         if REMBG_AVAILABLE and self.bria_session:
             try:
                 img_bytes = io.BytesIO()
@@ -297,7 +449,7 @@ class IDPhotoBooth:
                 white_bg = Image.new('RGBA', result_img.size, (255, 255, 255, 255))
                 version_bria = Image.alpha_composite(white_bg, result_img).convert('RGB')
             except Exception as e:
-                print(f"BRIA failed: {e}")
+                logger.error(f"BRIA failed: {e}")
         if BIREFNET_AVAILABLE and self.birefnet_model:
             try:
                 # Preprocess: Resize to model input size, normalize
@@ -320,17 +472,18 @@ class IDPhotoBooth:
                 white_bg = Image.new('RGBA', result_img.size, (255, 255, 255, 255))
                 version_birefnet = Image.alpha_composite(white_bg, result_img).convert('RGB')
             except Exception as e:
-                print(f"BiRefNet failed: {e}")
+                logger.error(f"BiRefNet failed: {e}")
         # Schedule preview on main thread
         self.root.after(0, lambda: self._show_preview(version_original, version_rembg, version_bria, version_birefnet))
 
-    def _show_preview(self, v_original, v_rembg, v_bria, v_birefnet):
+    def _show_preview(self, v_original: Image.Image, v_rembg: Optional[Image.Image],
+                      v_bria: Optional[Image.Image], v_birefnet: Optional[Image.Image]) -> None:
         """Show modal preview window with radio options, image display, filename entry, and buttons."""
         self.status_var.set("Previewing...")
         preview = tk.Toplevel(self.root)
         preview.title("Photo Preview")
         # Center window on screen for better usability
-        w, h = 400, 600
+        w, h = PREVIEW_WINDOW_WIDTH, PREVIEW_WINDOW_HEIGHT
         sx, sy = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         preview.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
         preview.transient(self.root)  # Tie to main window
@@ -344,7 +497,7 @@ class IDPhotoBooth:
             """Update displayed image based on selected radio option."""
             selected = {'original': v_original, 'rembg': v_rembg, 'bria': v_bria, 'birefnet': v_birefnet}.get(option_var.get())
             if selected:
-                photo = ImageTk.PhotoImage(selected.resize((300, 400), Image.LANCZOS))
+                photo = ImageTk.PhotoImage(selected.resize((PREVIEW_IMAGE_WIDTH, PREVIEW_IMAGE_HEIGHT), Image.LANCZOS))
                 img_label.config(image=photo)
                 img_label.image = photo  # Retain reference to prevent GC
 
@@ -390,15 +543,20 @@ class IDPhotoBooth:
             if path.exists():
                 if not messagebox.askyesno("Overwrite?", "File exists. Overwrite?"):
                     return
-            selected.save(path, 'JPEG', quality=self.config["output"]["jpeg_quality"])
-            preview.destroy()
-            self.status_var.set(f"Saved: {name}.jpg")
+            try:
+                selected.save(path, 'JPEG', quality=self.config["output"]["jpeg_quality"])
+                logger.info(f"Saved photo: {path}")
+                preview.destroy()
+                self.status_var.set(f"Saved: {name}.jpg")
+            except Exception as e:
+                logger.error(f"Failed to save photo {path}: {e}")
+                messagebox.showerror("Error", f"Failed to save photo: {e}")
 
         tk.Button(preview, text="Retake", command=retake).pack(side='left', padx=10, pady=10)
         tk.Button(preview, text="Save", command=save).pack(side='right', padx=10, pady=10)
         entry.bind('<Return>', lambda e: save())  # Enter key saves
 
-    def quit_app(self):
+    def quit_app(self) -> None:
         """Graceful shutdown: stop loops, release resources."""
         self.running = False
         if self.video_after_id:
@@ -406,7 +564,7 @@ class IDPhotoBooth:
         self.camera_stream.stop()
         self.root.destroy()
 
-    def run(self):
+    def run(self) -> None:
         """Run the app: start camera if possible, enter mainloop."""
         if self.start_camera():
             self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
