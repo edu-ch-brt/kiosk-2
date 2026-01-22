@@ -15,7 +15,7 @@ cd /home/runner/work/kiosk-2/kiosk-2
 python -m pip install -r requirements.txt
 ```
 - **Validated:** Works in this environment; downloads large dependencies (torch ~900MB + CUDA wheels). Expect several minutes and high bandwidth.
-- **Note:** This installs GPU-enabled torch wheels. If disk/network is constrained, consider disabling `birefnet`/`bria` in `config.json` for runtime use, but dependencies are still required by `requirements.txt`.
+- **Note:** This installs GPU-enabled torch wheels. `config.json` already has `"bria": false`; you can also disable `"birefnet": false` if you need to avoid model downloads at runtime, but dependencies are still required by `requirements.txt`.
 
 ### Run (GUI app)
 ```bash
@@ -23,7 +23,7 @@ python id_photo_booth.py
 ```
 - **Preconditions:** `head_outline.png` and `shutter_sound.wav` must be present in repo root; a webcam must be attached; `tkinter` must be available on the system.
 - **Validated failure in this environment:** `ModuleNotFoundError: No module named 'tkinter'` when running on the CI runner.
-  - **Workaround:** install OS package (e.g., `python3-tk`) or run on a desktop environment that includes Tkinter.
+  - **Workaround:** install OS package (e.g., `sudo apt-get install python3-tk` on Ubuntu/Debian) or run on a desktop environment that includes Tkinter.
 
 ### Tests
 ```bash
