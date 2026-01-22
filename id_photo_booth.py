@@ -15,22 +15,11 @@ from pathlib import Path
 import time
 from typing import Dict, Any, Optional, Tuple
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('id_photo_booth.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
 # Constants
 ASPECT_RATIO = 3 / 4  # Portrait 3:4 aspect ratio
 VIDEO_UPDATE_INTERVAL_MS = 33  # ~30 FPS
 LOADING_CHECK_INTERVAL_MS = 100  # Check model loading progress
-FRAME_SLEEP_MS = 0.001  # Camera stream sleep interval
+FRAME_SLEEP_SECONDS = 0.001  # Camera stream sleep interval in seconds
 PREVIEW_WINDOW_WIDTH = 400
 PREVIEW_WINDOW_HEIGHT = 600
 PREVIEW_IMAGE_WIDTH = 300
@@ -39,6 +28,17 @@ HEAD_OUTLINE_FILE = "head_outline.png"
 SHUTTER_SOUND_FILE = "shutter_sound.wav"
 CONFIG_FILE = "config.json"
 LOG_FILE = "id_photo_booth.log"
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Import rembg if available
 try:
@@ -81,25 +81,65 @@ def validate_config(config: Dict[str, Any]) -> None:
             raise ValueError(f"Missing required config section: {section}")
 
     # Validate output section
-    if config["output"]["width"] <= 0 or config["output"]["height"] <= 0:
+    try:
+        output_width = config["output"]["width"]
+        output_height = config["output"]["height"]
+        jpeg_quality = config["output"]["jpeg_quality"]
+        output_directory = config["output"]["directory"]
+    except KeyError as e:
+        raise ValueError(f"Missing required field in 'output' section: {e.args[0]}") from e
+    if output_width <= 0 or output_height <= 0:
         raise ValueError("Output dimensions must be positive")
-    if not 1 <= config["output"]["jpeg_quality"] <= 100:
+    if not 1 <= jpeg_quality <= 100:
         raise ValueError("JPEG quality must be between 1 and 100")
 
     # Validate display section
-    if config["display"]["width"] <= 0 or config["display"]["height"] <= 0:
+    try:
+        display_width = config["display"]["width"]
+        display_height = config["display"]["height"]
+        display_fullscreen = config["display"]["fullscreen"]
+    except KeyError as e:
+        raise ValueError(f"Missing required field in 'display' section: {e.args[0]}") from e
+    if display_width <= 0 or display_height <= 0:
         raise ValueError("Display dimensions must be positive")
 
     # Validate camera section
-    if config["camera"]["device_index"] < 0:
+    try:
+        camera_device_index = config["camera"]["device_index"]
+        camera_width = config["camera"]["width"]
+        camera_height = config["camera"]["height"]
+        camera_fps = config["camera"]["fps"]
+    except KeyError as e:
+        raise ValueError(f"Missing required field in 'camera' section: {e.args[0]}") from e
+    if camera_device_index < 0:
         raise ValueError("Camera device index cannot be negative")
-    if config["camera"]["width"] <= 0 or config["camera"]["height"] <= 0:
+    if camera_width <= 0 or camera_height <= 0:
         raise ValueError("Camera dimensions must be positive")
-    if config["camera"]["fps"] <= 0:
+    if camera_fps <= 0:
         raise ValueError("Camera FPS must be positive")
 
+    # Validate UI section
+    try:
+        _ = config["ui"]["title"]
+        _ = config["ui"]["subtitle"]
+    except KeyError as e:
+        raise ValueError(f"Missing required field in 'ui' section: {e.args[0]}") from e
+
+    # Validate background_options section
+    try:
+        _ = config["background_options"]["rembg"]
+        _ = config["background_options"]["bria"]
+        _ = config["background_options"]["birefnet"]
+    except KeyError as e:
+        raise ValueError(f"Missing required field in 'background_options' section: {e.args[0]}") from e
+
     # Validate BiRefNet section
-    if config["birefnet"]["processing_width"] <= 0 or config["birefnet"]["processing_height"] <= 0:
+    try:
+        birefnet_processing_width = config["birefnet"]["processing_width"]
+        birefnet_processing_height = config["birefnet"]["processing_height"]
+    except KeyError as e:
+        raise ValueError(f"Missing required field in 'birefnet' section: {e.args[0]}") from e
+    if birefnet_processing_width <= 0 or birefnet_processing_height <= 0:
         raise ValueError("BiRefNet processing dimensions must be positive")
 
     logger.info("Config validation passed")
@@ -188,7 +228,7 @@ class CameraStream:
                     self.failed_frame_count = 0
                 else:
                     self.failed_frame_count += 1
-            time.sleep(FRAME_SLEEP_MS)
+            time.sleep(FRAME_SLEEP_SECONDS)
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
         """Get the latest camera frame in a thread-safe manner.
