@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Unit tests for ID Photo Booth application."""
+"""Unit tests for ID Photo Booth application.
+
+This test suite uses the unittest framework (not pytest).
+Tests can be run with: python -m unittest test_id_photo_booth.py
+"""
 
 import unittest
 import json
