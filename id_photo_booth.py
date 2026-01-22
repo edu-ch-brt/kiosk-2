@@ -297,9 +297,6 @@ class IDPhotoBooth:
         self.device: str = "cpu"  # Will be set to cuda if available
         self.output_dir: Path = Path(self.config["output"]["directory"])
         self.output_dir.mkdir(exist_ok=True)
-        # Use preview resolution if specified, otherwise use full camera resolution
-        self.preview_width: int = self.config["camera"].get("preview_width", self.config["camera"]["width"])
-        self.preview_height: int = self.config["camera"].get("preview_height", self.config["camera"]["height"])
         self._setup_ui()
         self.root.bind('<space>', lambda e: self.capture_photo())
         self.root.bind('<Escape>', lambda e: self.quit_app())
@@ -467,30 +464,31 @@ class IDPhotoBooth:
             return
         ret, frame = self.camera_stream.read()
         if ret:
-            # Optimization: Resize to preview resolution first to reduce processing
-            # Use INTER_AREA for downscaling - fastest and best quality for shrinking
-            if frame.shape[1] > self.preview_width or frame.shape[0] > self.preview_height:
-                frame = cv2.resize(frame, (self.preview_width, self.preview_height),
-                                 interpolation=cv2.INTER_AREA)
-
-            # Crop frame to 3:4 aspect ratio by centering the shorter dimension
+            # First crop to 3:4 aspect ratio from the camera's native resolution
             h, w = frame.shape[:2]
             target_ratio = ASPECT_RATIO
             current_ratio = w / h
+
             if current_ratio > target_ratio:
+                # Width is too large, crop horizontally
                 crop_w = int(h * target_ratio)
                 start_x = (w - crop_w) // 2
                 frame = frame[:, start_x:start_x + crop_w]
             else:
+                # Height is too large, crop vertically
                 crop_h = int(w / target_ratio)
                 start_y = (h - crop_h) // 2
                 frame = frame[start_y:start_y + crop_h, :]
 
-            # Resize to display size and convert for PIL compositing
-            # Use INTER_AREA for downscaling, INTER_LINEAR for upscaling
-            interpolation = cv2.INTER_AREA if (frame.shape[1] > self.config["display"]["width"]) else cv2.INTER_LINEAR
-            frame = cv2.resize(frame, (self.config["display"]["width"], self.config["display"]["height"]),
-                             interpolation=interpolation)
+            # Now resize the cropped 3:4 frame to display size
+            # Use INTER_AREA for downscaling (best quality for shrinking)
+            frame = cv2.resize(
+                frame,
+                (self.config["display"]["width"], self.config["display"]["height"]),
+                interpolation=cv2.INTER_AREA
+            )
+
+            # Convert to RGBA for PIL compositing
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
             img = Image.fromarray(frame)
             if self.head_outline:
