@@ -1,6 +1,8 @@
 # Development dependencies for ID Photo Booth
 
 # Testing
+# Note: Tests are written using unittest framework (not pytest)
+# pytest is optional and can run unittest tests if preferred
 pytest>=7.4.0
 pytest-cov>=4.1.0
 pytest-mock>=3.11.0
