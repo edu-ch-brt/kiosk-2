@@ -1,0 +1,8 @@
+opencv-python
+pillow
+rembg
+numpy
+pygame  # For shutter sound
+torch
+torchvision
+transformers

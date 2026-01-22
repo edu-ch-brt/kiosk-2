@@ -1,0 +1,33 @@
+{
+  "output": {
+    "width": 300,
+    "height": 400,
+    "jpeg_quality": 95,
+    "directory": "id_photos"
+  },
+  "display": {
+    "width": 540,
+    "height": 720,
+    "fullscreen": true
+  },
+  "camera": {
+    "device_index": 0,
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "max_failed_frames": 10
+  },
+  "ui": {
+    "title": "Staff ID Photo",
+    "subtitle": "Position your head within the outline"
+  },
+  "background_options": {
+    "rembg": true,
+    "bria": false,
+    "birefnet": true
+  },
+  "birefnet": {
+    "processing_width": 288,
+    "processing_height": 384
+  }
+}
