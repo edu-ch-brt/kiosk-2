@@ -4,7 +4,7 @@
 import unittest
 import json
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 import tempfile
 import shutil
 
@@ -66,6 +66,146 @@ class TestConfigValidation(unittest.TestCase):
             id_photo_booth.validate_config(invalid_config)
         self.assertIn("JPEG quality must be between 1 and 100", str(context.exception))
 
+    def test_negative_display_dimensions(self):
+        """Test that negative display dimensions raise ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": -540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": 288, "processing_height": 384}
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("Display dimensions must be positive", str(context.exception))
+
+    def test_negative_camera_dimensions(self):
+        """Test that negative camera dimensions raise ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": 540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": -1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": 288, "processing_height": 384}
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("Camera dimensions must be positive", str(context.exception))
+
+    def test_zero_fps(self):
+        """Test that zero FPS raises ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": 540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 0, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": 288, "processing_height": 384}
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("Camera FPS must be positive", str(context.exception))
+
+    def test_negative_birefnet_dimensions(self):
+        """Test that negative BiRefNet processing dimensions raise ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": 540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": -288, "processing_height": 384}
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("BiRefNet processing dimensions must be positive", str(context.exception))
+
+    def test_missing_output_field(self):
+        """Test that missing field in output section raises ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95},  # Missing 'directory'
+            "display": {"width": 540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": 288, "processing_height": 384}
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("Missing required field in 'output' section", str(context.exception))
+
+    def test_missing_display_field(self):
+        """Test that missing field in display section raises ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": 540, "height": 720},  # Missing 'fullscreen'
+            "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": 288, "processing_height": 384}
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("Missing required field in 'display' section", str(context.exception))
+
+    def test_missing_camera_field(self):
+        """Test that missing field in camera section raises ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": 540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": 1280, "height": 720},  # Missing 'fps'
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": 288, "processing_height": 384}
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("Missing required field in 'camera' section", str(context.exception))
+
+    def test_missing_ui_field(self):
+        """Test that missing field in ui section raises ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": 540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo"},  # Missing 'subtitle'
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": 288, "processing_height": 384}
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("Missing required field in 'ui' section", str(context.exception))
+
+    def test_missing_background_options_field(self):
+        """Test that missing field in background_options section raises ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": 540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True},  # Missing 'birefnet'
+            "birefnet": {"processing_width": 288, "processing_height": 384}
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("Missing required field in 'background_options' section", str(context.exception))
+
+    def test_missing_birefnet_field(self):
+        """Test that missing field in birefnet section raises ValueError."""
+        invalid_config = {
+            "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": 540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": 288}  # Missing 'processing_height'
+        }
+        with self.assertRaises(ValueError) as context:
+            id_photo_booth.validate_config(invalid_config)
+        self.assertIn("Missing required field in 'birefnet' section", str(context.exception))
+
 
 class TestLoadConfig(unittest.TestCase):
     """Test configuration loading."""
@@ -73,13 +213,21 @@ class TestLoadConfig(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.test_dir = tempfile.mkdtemp()
-        self.original_file = id_photo_booth.__file__
-        # Mock the __file__ attribute
-        id_photo_booth.__file__ = str(Path(self.test_dir) / "id_photo_booth.py")
+        # Create a mock Path that redirects to our test directory
+        original_Path = Path
+
+        def fake_Path(arg):
+            # When id_photo_booth uses Path(__file__), redirect it to test directory
+            if str(arg) == id_photo_booth.__file__:
+                return original_Path(self.test_dir) / "id_photo_booth.py"
+            return original_Path(arg)
+
+        self.path_patcher = patch("id_photo_booth.Path", side_effect=fake_Path)
+        self.path_patcher.start()
 
     def tearDown(self):
         """Clean up test fixtures."""
-        id_photo_booth.__file__ = self.original_file
+        self.path_patcher.stop()
         shutil.rmtree(self.test_dir)
 
     def test_load_defaults_when_no_config(self):
@@ -107,6 +255,38 @@ class TestLoadConfig(unittest.TestCase):
         config = id_photo_booth.load_config()
         self.assertEqual(config["ui"]["title"], "Test Photo")
         self.assertEqual(config["display"]["fullscreen"], False)
+
+    def test_load_config_with_invalid_json(self):
+        """Test that invalid JSON falls back to defaults."""
+        config_path = Path(self.test_dir) / "config.json"
+        with open(config_path, 'w') as f:
+            f.write("{invalid json content")
+
+        config = id_photo_booth.load_config()
+        # Should return defaults
+        self.assertIsInstance(config, dict)
+        self.assertIn("output", config)
+        self.assertEqual(config["output"]["width"], 300)
+
+    def test_load_config_with_validation_failure(self):
+        """Test that config with validation errors falls back to defaults."""
+        invalid_config = {
+            "output": {"width": -300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
+            "display": {"width": 540, "height": 720, "fullscreen": True},
+            "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+            "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
+            "background_options": {"rembg": True, "bria": True, "birefnet": True},
+            "birefnet": {"processing_width": 288, "processing_height": 384}
+        }
+        config_path = Path(self.test_dir) / "config.json"
+        with open(config_path, 'w') as f:
+            json.dump(invalid_config, f)
+
+        config = id_photo_booth.load_config()
+        # Should return defaults
+        self.assertIsInstance(config, dict)
+        self.assertIn("output", config)
+        self.assertEqual(config["output"]["width"], 300)  # Default value
 
 
 class TestCameraStream(unittest.TestCase):
