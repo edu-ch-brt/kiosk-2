@@ -120,16 +120,16 @@ def validate_config(config: Dict[str, Any]) -> None:
 
     # Validate UI section
     try:
-        ui_title = config["ui"]["title"]
-        ui_subtitle = config["ui"]["subtitle"]
+        _ = config["ui"]["title"]
+        _ = config["ui"]["subtitle"]
     except KeyError as e:
         raise ValueError(f"Missing required field in 'ui' section: {e.args[0]}") from e
 
     # Validate background_options section
     try:
-        bg_rembg = config["background_options"]["rembg"]
-        bg_bria = config["background_options"]["bria"]
-        bg_birefnet = config["background_options"]["birefnet"]
+        _ = config["background_options"]["rembg"]
+        _ = config["background_options"]["bria"]
+        _ = config["background_options"]["birefnet"]
     except KeyError as e:
         raise ValueError(f"Missing required field in 'background_options' section: {e.args[0]}") from e
 
