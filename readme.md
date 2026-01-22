@@ -19,7 +19,9 @@ A Python app for capturing standardized 300x400 JPG ID photos via webcam, with l
 
 ## Installation
 1. Clone or download repo.
-2. Install deps: `pip install -r requirements.txt`
+2. Install dependencies:
+   - **For CPU-only (works everywhere):** `pip install -r requirements.txt`
+   - **For GPU acceleration (5-10x faster, requires NVIDIA GPU):** `pip install -r requirements-gpu.txt`
 3. Download head_outline.png: [Your URL] and place in dir.
 4. Download shutter_sound.wav: https://github.com/edu-ch-brt/staff-id-photo-kiosk/raw/refs/heads/claude/implement-feature-mkeef0xxabd1qw8s-fnhwW/shutter_sound.wav and place in dir (for audio feedback).
 5. Optional: Edit config.json (e.g., camera index, fullscreen=false for testing; toggle background_options to enable/disable rembg/bria/birefnet—original always on).
@@ -49,10 +51,7 @@ For detailed optimization information, see [OPTIMIZATIONS.md](OPTIMIZATIONS.md).
 
 ### GPU Support
 
-If you have an NVIDIA GPU with CUDA:
-1. Install CUDA-enabled PyTorch: `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118`
-2. GPU will be automatically detected and used for BiRefNet
-3. Check logs for "BiRefNet-portrait model moved to GPU"
+If you have an NVIDIA GPU with CUDA, use `requirements-gpu.txt` during installation (see step 2 above). The GPU will be automatically detected and used for BiRefNet. To verify GPU usage, check logs for "BiRefNet-portrait model moved to GPU".
 
 ## Notes
 - First run downloads models (~300-500MB each, needs internet)—progress bar shows.

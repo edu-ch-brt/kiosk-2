@@ -203,6 +203,48 @@ frame = frame[start_y:start_y + crop_h, :]  # Vertical crop
 }
 ```
 
+## GPU Installation
+
+For optimal performance with GPU acceleration (5-10x faster background removal):
+
+### Option 1: Use GPU Requirements File (Recommended)
+
+During initial installation:
+```bash
+pip install -r requirements-gpu.txt
+```
+
+### Option 2: Upgrade Existing Installation
+
+If you already installed with `requirements.txt`:
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+```
+
+### Verification
+
+The application will automatically detect and use your GPU. Check the log file for confirmation:
+```bash
+grep "BiRefNet-portrait model" id_photo_booth.log
+```
+
+**Expected output (GPU detected):**
+```
+BiRefNet-portrait model moved to GPU
+```
+
+**Expected output (CPU fallback):**
+```
+BiRefNet-portrait model using CPU
+```
+
+### Quick GPU Check
+
+To verify CUDA is available:
+```python
+python -c "import torch; print(f'CUDA Available: {torch.cuda.is_available()}')"
+```
+
 ## Hardware Requirements
 
 ### Minimum (CPU Only)
