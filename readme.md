@@ -20,7 +20,7 @@ A Python app for capturing standardized 300x400 JPG ID photos via webcam, with l
 ## Installation
 1. Clone or download repo.
 2. Install dependencies:
-   - **For CPU-only (works everywhere):** `pip install -r requirements.txt`
+   - **Standard install (CPU-compatible, may download CUDA-enabled torch wheels):** `pip install -r requirements.txt`
    - **For GPU acceleration (5-10x faster, requires NVIDIA GPU):** `pip install -r requirements-gpu.txt`
 3. Download head_outline.png: [Your URL] and place in dir.
 4. Download shutter_sound.wav: https://github.com/edu-ch-brt/staff-id-photo-kiosk/raw/refs/heads/claude/implement-feature-mkeef0xxabd1qw8s-fnhwW/shutter_sound.wav and place in dir (for audio feedback).
@@ -39,10 +39,9 @@ A Python app for capturing standardized 300x400 JPG ID photos via webcam, with l
 This version includes significant CPU optimizations:
 
 - **Reduced Frame Rate:** 15 FPS preview (down from 30) for ~50% lower CPU usage
-- **Dual Resolution:** Lower resolution preview (640x480) with full resolution capture (1280x720)
 - **GPU Acceleration:** Automatic GPU support for BiRefNet (5-10x faster on CUDA GPUs)
 - **Optimized BiRefNet:** Smaller processing resolution (192x256) for faster inference
-- **Faster Interpolation:** Optimized resize algorithms (INTER_AREA for downscaling)
+- **Faster Interpolation:** Optimized resize algorithms (INTER_AREA for downscaling, INTER_LINEAR for upscaling)
 - **Cached Transforms:** Pre-computed BiRefNet transform pipeline
 
 **Result:** ~40-60% CPU reduction during preview with identical final photo quality.

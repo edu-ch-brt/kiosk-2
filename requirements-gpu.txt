@@ -10,7 +10,7 @@ pygame  # For shutter sound
 # PyTorch with CUDA 11.8 support (GPU-accelerated)
 # This provides 5-10x faster background removal with BiRefNet
 # Falls back to CPU automatically if GPU not available
---extra-index-url https://download.pytorch.org/whl/cu118
+--index-url https://download.pytorch.org/whl/cu118
 torch
 torchvision
 

@@ -25,40 +25,19 @@ The optimizations focus on reducing CPU usage during real-time video preview whi
 }
 ```
 
-### 2. Dual Resolution System
-
-**Files Changed:** `id_photo_booth.py`, `config.json`
-
-Implemented separate resolutions for preview and capture:
-
-- **Preview Resolution:** 640x480 (reduced from 1280x720)
-- **Capture Resolution:** 1280x720 (unchanged - maintains quality for final photos)
-
-**Impact:** ~60% fewer pixels to process during preview, significantly reducing CPU load.
-
-**Configuration:**
-```json
-"camera": {
-  "width": 1280,
-  "height": 720,
-  "preview_width": 640,
-  "preview_height": 480
-}
-```
-
-### 3. Optimized Image Interpolation
+### 2. Optimized Image Interpolation
 
 **Files Changed:** `id_photo_booth.py`
 
-Replaced interpolation algorithms with faster alternatives:
+Replaced interpolation algorithms with faster and more appropriate alternatives:
 
 - **Downscaling:** Using `cv2.INTER_AREA` (fastest and highest quality for shrinking)
-- **Upscaling:** Using `cv2.INTER_LINEAR` (faster than `cv2.INTER_LANCZOS`)
+- **Upscaling:** Using `cv2.INTER_LINEAR` (faster than `cv2.INTER_LANCZOS` and suitable for upscaling)
 - **Mask Resizing:** Using `PIL Image.BILINEAR` instead of `Image.LANCZOS`
 
-**Impact:** 2-3x faster image resizing operations.
+**Impact:** 2-3x faster image resizing operations with appropriate interpolation for each use case.
 
-### 4. GPU Acceleration for BiRefNet
+### 3. GPU Acceleration for BiRefNet
 
 **Files Changed:** `id_photo_booth.py`, `config.json`
 
@@ -70,13 +49,6 @@ Added GPU support with automatic detection:
 
 **Impact:** 5-10x faster background removal on GPU-enabled systems.
 
-**Configuration:**
-```json
-"birefnet": {
-  "use_gpu": true
-}
-```
-
 **GPU Detection Log Examples:**
 ```
 BiRefNet-portrait model moved to GPU
@@ -86,7 +58,7 @@ or
 BiRefNet-portrait model using CPU
 ```
 
-### 5. Reduced BiRefNet Processing Resolution
+### 4. Reduced BiRefNet Processing Resolution
 
 **Files Changed:** `id_photo_booth.py`, `config.json`
 
@@ -105,7 +77,7 @@ Optimized BiRefNet input dimensions:
 }
 ```
 
-### 6. Pre-cached Transform Pipeline
+### 5. Pre-cached Transform Pipeline
 
 **Files Changed:** `id_photo_booth.py`
 
@@ -121,7 +93,7 @@ self.birefnet_transform = transforms.Compose([
 
 **Impact:** Eliminates overhead of recreating transform objects for each photo capture.
 
-### 7. Optimized Frame Cropping
+### 6. Optimized Frame Cropping
 
 **Files Changed:** `id_photo_booth.py`
 
@@ -157,14 +129,11 @@ frame = frame[start_y:start_y + crop_h, :]  # Vertical crop
 ```json
 {
   "camera": {
-    "fps": 15,
-    "preview_width": 640,
-    "preview_height": 480
+    "fps": 15
   },
   "birefnet": {
     "processing_width": 192,
-    "processing_height": 256,
-    "use_gpu": true
+    "processing_height": 256
   }
 }
 ```
@@ -174,14 +143,11 @@ frame = frame[start_y:start_y + crop_h, :]  # Vertical crop
 ```json
 {
   "camera": {
-    "fps": 30,
-    "preview_width": 1280,
-    "preview_height": 720
+    "fps": 30
   },
   "birefnet": {
     "processing_width": 384,
-    "processing_height": 512,
-    "use_gpu": true
+    "processing_height": 512
   }
 }
 ```
@@ -191,14 +157,11 @@ frame = frame[start_y:start_y + crop_h, :]  # Vertical crop
 ```json
 {
   "camera": {
-    "fps": 15,
-    "preview_width": 640,
-    "preview_height": 480
+    "fps": 15
   },
   "birefnet": {
     "processing_width": 192,
-    "processing_height": 256,
-    "use_gpu": true
+    "processing_height": 256
   }
 }
 ```
@@ -300,11 +263,6 @@ python -c "import torch; print(f'CUDA Available: {torch.cuda.is_available()}')"
    grep "VIDEO_UPDATE_INTERVAL_MS" id_photo_booth.log
    ```
 
-3. Ensure preview resolution is being used:
-   ```bash
-   grep "preview_width\|preview_height" config.json
-   ```
-
 ### GPU Not Being Used
 
 1. Check CUDA availability:
@@ -316,11 +274,6 @@ python -c "import torch; print(f'CUDA Available: {torch.cuda.is_available()}')"
 2. Check log file:
    ```bash
    grep "BiRefNet-portrait model" id_photo_booth.log
-   ```
-
-3. Verify GPU configuration:
-   ```bash
-   grep "use_gpu" config.json
    ```
 
 ## Notes

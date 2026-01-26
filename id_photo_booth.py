@@ -109,17 +109,12 @@ def validate_config(config: Dict[str, Any]) -> None:
         camera_width = config["camera"]["width"]
         camera_height = config["camera"]["height"]
         camera_fps = config["camera"]["fps"]
-        # Optional fields with defaults
-        camera_preview_width = config["camera"].get("preview_width", camera_width)
-        camera_preview_height = config["camera"].get("preview_height", camera_height)
     except KeyError as e:
         raise ValueError(f"Missing required field in 'camera' section: {e.args[0]}") from e
     if camera_device_index < 0:
         raise ValueError("Camera device index cannot be negative")
     if camera_width <= 0 or camera_height <= 0:
         raise ValueError("Camera dimensions must be positive")
-    if camera_preview_width <= 0 or camera_preview_height <= 0:
-        raise ValueError("Camera preview dimensions must be positive")
     if camera_fps <= 0:
         raise ValueError("Camera FPS must be positive")
 
@@ -142,8 +137,6 @@ def validate_config(config: Dict[str, Any]) -> None:
     try:
         birefnet_processing_width = config["birefnet"]["processing_width"]
         birefnet_processing_height = config["birefnet"]["processing_height"]
-        # Optional field with default
-        birefnet_use_gpu = config["birefnet"].get("use_gpu", True)
     except KeyError as e:
         raise ValueError(f"Missing required field in 'birefnet' section: {e.args[0]}") from e
     if birefnet_processing_width <= 0 or birefnet_processing_height <= 0:
@@ -168,9 +161,7 @@ def load_config() -> Dict[str, Any]:
             "width": 1280,
             "height": 720,
             "fps": 15,  # Optimized: Reduced from 30 to 15 FPS for lower CPU usage
-            "max_failed_frames": 10,
-            "preview_width": 640,  # Lower resolution for preview to reduce CPU load
-            "preview_height": 480
+            "max_failed_frames": 10
         },
         "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
         "background_options": {"rembg": True, "bria": True, "birefnet": True},
@@ -481,11 +472,19 @@ class IDPhotoBooth:
                 frame = frame[start_y:start_y + crop_h, :]
 
             # Now resize the cropped 3:4 frame to display size
-            # Use INTER_AREA for downscaling (best quality for shrinking)
+            # Use INTER_AREA for downscaling (best quality for shrinking),
+            # and INTER_LINEAR for upscaling to preserve detail.
+            crop_h, crop_w = frame.shape[:2]
+            display_width = self.config["display"]["width"]
+            display_height = self.config["display"]["height"]
+            if crop_w > display_width or crop_h > display_height:
+                interpolation = cv2.INTER_AREA  # downscaling
+            else:
+                interpolation = cv2.INTER_LINEAR  # upscaling or same size
             frame = cv2.resize(
                 frame,
-                (self.config["display"]["width"], self.config["display"]["height"]),
-                interpolation=cv2.INTER_AREA
+                (display_width, display_height),
+                interpolation=interpolation
             )
 
             # Convert to RGBA for PIL compositing
@@ -494,7 +493,14 @@ class IDPhotoBooth:
             if self.head_outline:
                 img = Image.alpha_composite(img.convert('RGBA'), self.head_outline)
             self.photo = ImageTk.PhotoImage(img)
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
+            
+            # Reuse a single canvas image item to avoid accumulating items every frame
+            if hasattr(self, "video_canvas_image_id"):
+                self.canvas.itemconfig(self.video_canvas_image_id, image=self.photo)
+            else:
+                self.video_canvas_image_id = self.canvas.create_image(
+                    0, 0, anchor=tk.NW, image=self.photo
+                )
         self.video_after_id = self.root.after(VIDEO_UPDATE_INTERVAL_MS, self._update_video)  # Target ~15 FPS
 
     def capture_photo(self) -> None:
