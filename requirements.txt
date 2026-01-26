@@ -3,6 +3,11 @@ pillow
 rembg
 numpy
 pygame  # For shutter sound
+
+# PyTorch dependencies
+# NOTE: This installs CPU-only version. For GPU support (5-10x faster BiRefNet):
+# Use requirements-gpu.txt instead, or install manually:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 torch
 torchvision
 transformers

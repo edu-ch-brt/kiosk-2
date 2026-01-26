@@ -14,7 +14,7 @@
     "device_index": 0,
     "width": 1280,
     "height": 720,
-    "fps": 30,
+    "fps": 15,
     "max_failed_frames": 10
   },
   "ui": {
@@ -27,7 +27,8 @@
     "birefnet": true
   },
   "birefnet": {
-    "processing_width": 288,
-    "processing_height": 384
+    "processing_width": 192,
+    "processing_height": 256,
+    "use_gpu": true
   }
 }

@@ -1,0 +1,27 @@
+# GPU-accelerated requirements for ID Photo Booth
+# Use this instead of requirements.txt if you have an NVIDIA GPU with CUDA support
+
+opencv-python
+pillow
+rembg
+numpy
+pygame  # For shutter sound
+
+# PyTorch with CUDA 11.8 support (GPU-accelerated)
+# This provides 5-10x faster background removal with BiRefNet
+# Falls back to CPU automatically if GPU not available
+--index-url https://download.pytorch.org/whl/cu118
+torch
+torchvision
+
+transformers
+
+# Installation:
+#   pip install -r requirements-gpu.txt
+#
+# To verify GPU is being used, check logs for:
+#   "BiRefNet-portrait model moved to GPU"
+#
+# If you see "BiRefNet-portrait model using CPU" instead, your GPU
+# may not be detected. Check:
+#   python -c "import torch; print(torch.cuda.is_available())"

@@ -17,9 +17,9 @@ from typing import Dict, Any, Optional, Tuple
 
 # Constants
 ASPECT_RATIO = 3 / 4  # Portrait 3:4 aspect ratio
-VIDEO_UPDATE_INTERVAL_MS = 33  # ~30 FPS
+VIDEO_UPDATE_INTERVAL_MS = 66  # ~15 FPS (optimized from 30 FPS for lower CPU usage)
 LOADING_CHECK_INTERVAL_MS = 100  # Check model loading progress
-FRAME_SLEEP_SECONDS = 0.001  # Camera stream sleep interval in seconds
+FRAME_SLEEP_SECONDS = 0.01  # Camera stream sleep interval (increased for lower CPU)
 PREVIEW_WINDOW_WIDTH = 400
 PREVIEW_WINDOW_HEIGHT = 600
 PREVIEW_IMAGE_WIDTH = 300
@@ -156,10 +156,20 @@ def load_config() -> Dict[str, Any]:
     defaults: Dict[str, Any] = {
         "output": {"width": 300, "height": 400, "jpeg_quality": 95, "directory": "id_photos"},
         "display": {"width": 540, "height": 720, "fullscreen": True},
-        "camera": {"device_index": 0, "width": 1280, "height": 720, "fps": 30, "max_failed_frames": 10},
+        "camera": {
+            "device_index": 0,
+            "width": 1280,
+            "height": 720,
+            "fps": 15,  # Optimized: Reduced from 30 to 15 FPS for lower CPU usage
+            "max_failed_frames": 10
+        },
         "ui": {"title": "Staff ID Photo", "subtitle": "Position your head within the outline"},
         "background_options": {"rembg": True, "bria": True, "birefnet": True},
-        "birefnet": {"processing_width": 288, "processing_height": 384}
+        "birefnet": {
+            "processing_width": 192,  # Optimized: Reduced from 288 for faster processing
+            "processing_height": 256,  # Optimized: Reduced from 384 for faster processing
+            "use_gpu": True  # Enable GPU acceleration if available
+        }
     }
     if config_path.exists():
         try:
@@ -274,6 +284,8 @@ class IDPhotoBooth:
         self.rembg_session: Optional[Any] = None
         self.bria_session: Optional[Any] = None
         self.birefnet_model: Optional[Any] = None
+        self.birefnet_transform: Optional[Any] = None  # Cache transform for performance
+        self.device: str = "cpu"  # Will be set to cuda if available
         self.output_dir: Path = Path(self.config["output"]["directory"])
         self.output_dir.mkdir(exist_ok=True)
         self._setup_ui()
@@ -320,13 +332,28 @@ class IDPhotoBooth:
         """Setup main UI elements: labels, canvas, status, and hidden loading frame."""
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
         tk.Label(self.main_frame, text=self.config["ui"]["title"], font=('Helvetica', 24, 'bold')).pack(pady=10)
         tk.Label(self.main_frame, text=self.config["ui"]["subtitle"], font=('Helvetica', 12)).pack(pady=5)
-        self.canvas = tk.Canvas(self.main_frame, width=self.config["display"]["width"], height=self.config["display"]["height"])
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        # Canvas container for centering
+        canvas_container = tk.Frame(self.main_frame)
+        canvas_container.pack(fill=tk.BOTH, expand=True)
+
+        # Canvas with fixed size to maintain aspect ratio
+        self.canvas = tk.Canvas(
+            canvas_container,
+            width=self.config["display"]["width"],
+            height=self.config["display"]["height"],
+            highlightthickness=0
+        )
+        self.canvas.pack(anchor=tk.CENTER, expand=True)
+
+        # Status label
         self.status_var = tk.StringVar(value="Initializing...")
         tk.Label(self.main_frame, textvariable=self.status_var, font=('Helvetica', 12)).pack(pady=10)
-        
+
         # Add hidden loading frame with progress bar
         self.loading_frame = tk.Frame(self.main_frame)
         self.progress_bar = ttk.Progressbar(self.loading_frame, mode='indeterminate', length=300)
@@ -382,6 +409,27 @@ class IDPhotoBooth:
                         "ZhengPeng7/BiRefNet-portrait", trust_remote_code=True
                     )
                     self.birefnet_model.eval()
+
+                    # GPU optimization: Move model to GPU if available and configured
+                    if self.config["birefnet"].get("use_gpu", True) and torch.cuda.is_available():
+                        self.device = "cuda"
+                        self.birefnet_model = self.birefnet_model.to(self.device)
+                        logger.info("BiRefNet-portrait model moved to GPU")
+                    else:
+                        self.device = "cpu"
+                        logger.info("BiRefNet-portrait model using CPU")
+
+                    # Pre-cache the transform for performance
+                    image_size = (
+                        self.config["birefnet"]["processing_height"],
+                        self.config["birefnet"]["processing_width"]
+                    )
+                    self.birefnet_transform = transforms.Compose([
+                        transforms.Resize(image_size),
+                        transforms.ToTensor(),
+                        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                    ])
+
                     logger.info("BiRefNet-portrait model loaded successfully")
                 except Exception as e:
                     logger.error(f"Failed to load BiRefNet-portrait model: {e}")
@@ -407,27 +455,53 @@ class IDPhotoBooth:
             return
         ret, frame = self.camera_stream.read()
         if ret:
-            # Crop frame to 3:4 aspect ratio by centering the shorter dimension
+            # First crop to 3:4 aspect ratio from the camera's native resolution
             h, w = frame.shape[:2]
             target_ratio = ASPECT_RATIO
             current_ratio = w / h
+
             if current_ratio > target_ratio:
+                # Width is too large, crop horizontally
                 crop_w = int(h * target_ratio)
                 start_x = (w - crop_w) // 2
                 frame = frame[:, start_x:start_x + crop_w]
             else:
+                # Height is too large, crop vertically
                 crop_h = int(w / target_ratio)
                 start_y = (h - crop_h) // 2
                 frame = frame[start_y:start_y + crop_h, :]
-            # Resize to display size and convert for PIL compositing
-            frame = cv2.resize(frame, (self.config["display"]["width"], self.config["display"]["height"]))
+
+            # Now resize the cropped 3:4 frame to display size
+            # Use INTER_AREA for downscaling (best quality for shrinking),
+            # and INTER_LINEAR for upscaling to preserve detail.
+            crop_h, crop_w = frame.shape[:2]
+            display_width = self.config["display"]["width"]
+            display_height = self.config["display"]["height"]
+            if crop_w > display_width or crop_h > display_height:
+                interpolation = cv2.INTER_AREA  # downscaling
+            else:
+                interpolation = cv2.INTER_LINEAR  # upscaling or same size
+            frame = cv2.resize(
+                frame,
+                (display_width, display_height),
+                interpolation=interpolation
+            )
+
+            # Convert to RGBA for PIL compositing
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
             img = Image.fromarray(frame)
             if self.head_outline:
                 img = Image.alpha_composite(img.convert('RGBA'), self.head_outline)
             self.photo = ImageTk.PhotoImage(img)
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
-        self.video_after_id = self.root.after(VIDEO_UPDATE_INTERVAL_MS, self._update_video)  # Target ~30 FPS
+            
+            # Reuse a single canvas image item to avoid accumulating items every frame
+            if hasattr(self, "video_canvas_image_id"):
+                self.canvas.itemconfig(self.video_canvas_image_id, image=self.photo)
+            else:
+                self.video_canvas_image_id = self.canvas.create_image(
+                    0, 0, anchor=tk.NW, image=self.photo
+                )
+        self.video_after_id = self.root.after(VIDEO_UPDATE_INTERVAL_MS, self._update_video)  # Target ~15 FPS
 
     def capture_photo(self) -> None:
         """Capture current camera frame and initiate processing.
@@ -490,22 +564,33 @@ class IDPhotoBooth:
                 version_bria = Image.alpha_composite(white_bg, result_img).convert('RGB')
             except Exception as e:
                 logger.error(f"BRIA failed: {e}")
-        if BIREFNET_AVAILABLE and self.birefnet_model:
+        if BIREFNET_AVAILABLE and self.birefnet_model and self.birefnet_transform:
             try:
-                # Preprocess: Resize to model input size, normalize
-                image_size = (self.config["birefnet"]["processing_height"], self.config["birefnet"]["processing_width"])  # Portrait orientation
-                transform = transforms.Compose([
-                    transforms.Resize(image_size),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-                ])
-                input_tensor = transform(pil_img).unsqueeze(0)
-                # Inference
+                # Preprocess: Use cached transform
+                input_tensor = self.birefnet_transform(pil_img).unsqueeze(0)
+
+                # Move to GPU if available
+                if self.device == "cuda":
+                    input_tensor = input_tensor.to(self.device)
+
+                # Inference with optimizations
                 with torch.no_grad():
-                    preds = self.birefnet_model(input_tensor)[-1].sigmoid()
+                    # Use half precision on GPU for faster inference (if supported)
+                    if self.device == "cuda" and torch.cuda.get_device_capability()[0] >= 7:
+                        with torch.cuda.amp.autocast():
+                            preds = self.birefnet_model(input_tensor)[-1].sigmoid()
+                    else:
+                        preds = self.birefnet_model(input_tensor)[-1].sigmoid()
+
+                # Move back to CPU for post-processing
+                if self.device == "cuda":
+                    preds = preds.cpu()
+
                 pred = preds[0].squeeze()
                 pred_pil = transforms.ToPILImage()(pred)
-                mask = pred_pil.resize(pil_img.size)
+                # Use faster BILINEAR instead of LANCZOS for mask resizing
+                mask = pred_pil.resize(pil_img.size, Image.BILINEAR)
+
                 # Postprocess: Apply mask to image on white bg
                 result_img = Image.new('RGBA', pil_img.size)
                 result_img.paste(pil_img, mask=mask.convert('L'))
